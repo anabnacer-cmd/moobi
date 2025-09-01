@@ -1,0 +1,82 @@
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Conexão com MongoDB Atlas (troque pela sua URL)
+mongoose.connect("SUA_STRING_DO_MONGODB_ATLAS", {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+}).then(() => console.log("MongoDB conectado"))
+.catch(err => console.log(err));
+
+// ===== Schemas =====
+const UserSchema = new mongoose.Schema({
+    username: String,
+    password: String,
+    expenses: [String], // categorias escolhidas no primeiro acesso
+});
+
+const ExpenseSchema = new mongoose.Schema({
+    userId: String,
+    month: String,
+    salary: Number,
+    expenses: Object, // {agua: 100, luz: 200, ...}
+    totalLeft: Number
+});
+
+const User = mongoose.model("User", UserSchema);
+const Expense = mongoose.model("Expense", ExpenseSchema);
+
+// ===== Rotas =====
+
+// Cadastro
+app.post("/register", async (req, res) => {
+    const { username, password } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = new User({ username, password: hashedPassword });
+    await user.save();
+    res.json({ message: "Usuário registrado!" });
+});
+
+// Login
+app.post("/login", async (req, res) => {
+    const { username, password } = req.body;
+    const user = await User.findOne({ username });
+    if (!user) return res.status(400).json({ message: "Usuário não encontrado" });
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) return res.status(400).json({ message: "Senha incorreta" });
+
+    const token = jwt.sign({ id: user._id }, "segredo123", { expiresIn: "1d" });
+    res.json({ token, userId: user._id, expenses: user.expenses });
+});
+
+// Salvar categorias fixas (primeiro acesso)
+app.post("/setExpenses", async (req, res) => {
+    const { userId, expenses } = req.body;
+    await User.findByIdAndUpdate(userId, { expenses });
+    res.json({ message: "Categorias salvas!" });
+});
+
+// Salvar tabela de gastos
+app.post("/saveTable", async (req, res) => {
+    const { userId, salary, expenses, totalLeft, month } = req.body;
+    const newTable = new Expense({ userId, month, salary, expenses, totalLeft });
+    await newTable.save();
+    res.json({ message: "Tabela salva!" });
+});
+
+// Buscar meses anteriores
+app.get("/history/:userId", async (req, res) => {
+    const history = await Expense.find({ userId: req.params.userId });
+    res.json(history);
+});
+
+// Start server
+app.listen(5000, () => console.log("Servidor rodando na porta 5000"));
